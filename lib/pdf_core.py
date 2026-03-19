@@ -212,3 +212,167 @@ def extract_blocks(path: Path) -> list[dict]:
 
     doc.close()
     return all_blocks
+
+
+# ---------------------------------------------------------------------------
+# Section assignment
+# ---------------------------------------------------------------------------
+
+def assign_sections(
+    blocks: list[dict],
+    headings: list[dict],
+    toc: list[dict],
+) -> list[dict]:
+    """Assign section IDs to blocks based on headings.
+
+    Each block gets a 'section' field (e.g., 's1', 's2.1') based on
+    the most recent heading above it. Blocks before any heading get section=None.
+
+    If no headings exist, all blocks get section=None.
+    """
+    if not headings:
+        for b in blocks:
+            b["section"] = None
+        return blocks
+
+    # Build section labels from TOC hierarchy if available
+    section_labels = {}
+    if toc:
+        level_counters: list[int] = []
+        for entry in toc:
+            level = entry["level"]
+            while len(level_counters) < level:
+                level_counters.append(0)
+            level_counters = level_counters[:level]
+            level_counters[-1] += 1
+            label = "s" + ".".join(str(c) for c in level_counters)
+            # Match TOC entry to heading by text similarity
+            for h in headings:
+                if entry["title"].strip() in h["text"] or h["text"] in entry["title"].strip():
+                    section_labels[(h["page"], h["y"])] = label
+                    break
+
+    # Fallback: label headings sequentially if TOC matching didn't cover all
+    fallback_counter = 0
+    for h in headings:
+        key = (h["page"], h["y"])
+        if key not in section_labels:
+            fallback_counter += 1
+            section_labels[key] = f"s{fallback_counter}"
+
+    # Sort headings by position
+    sorted_headings = sorted(headings, key=lambda h: (h["page"], h["y"]))
+
+    # Assign sections to blocks
+    for block in blocks:
+        block["section"] = None
+        for h in reversed(sorted_headings):
+            if (block["page"] > h["page"]) or (
+                block["page"] == h["page"] and block["y"] >= h["y"]
+            ):
+                block["section"] = section_labels.get((h["page"], h["y"]))
+                break
+
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# Block ID generation
+# ---------------------------------------------------------------------------
+
+def _generate_block_id(
+    block: dict, page_counters: dict, sections_detected: bool,
+    ref_label: str = "",
+) -> str:
+    """Generate a referenciable block ID.
+
+    Format with ref + sections: ref1:p{page}:s{section}:b{n}
+    Format with ref, no sections: ref1:p{page}:b{n}
+    Format without ref: p{page}:s{section}:b{n} or p{page}:b{n}
+    """
+    page = block["page"]
+    section = block.get("section")
+
+    key = (page, section) if sections_detected else (page,)
+    page_counters[key] = page_counters.get(key, 0) + 1
+    n = page_counters[key]
+
+    type_prefix = {"table": "t", "figure": "f"}.get(block["type"], "b")
+
+    prefix = f"{ref_label}:" if ref_label else ""
+    if sections_detected and section:
+        return f"{prefix}p{page}:{section}:{type_prefix}{n}"
+    return f"{prefix}p{page}:{type_prefix}{n}"
+
+
+# ---------------------------------------------------------------------------
+# Manifest builder
+# ---------------------------------------------------------------------------
+
+def build_manifest(path: Path, ref_label: str = "") -> dict:
+    """Build a complete manifest of the PDF — compact index of all blocks.
+
+    This is the primary entry point for the MANIFEST mode.
+
+    Args:
+        path: Path to the PDF file.
+        ref_label: Optional reference label (e.g., "ref1") prepended to block IDs.
+
+    Returns metadata, blocks (with IDs and previews), sections_detected flag,
+    image_only flag, and stats.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"PDF not found: {path}")
+
+    metadata = extract_metadata(path)
+    blocks = extract_blocks(path)
+    headings = detect_headings(path)
+    blocks = assign_sections(blocks, headings, metadata["toc"])
+
+    sections_detected = any(b.get("section") is not None for b in blocks)
+
+    # Detect image-only PDFs (no text blocks but at least one page)
+    has_text = len(blocks) > 0
+    doc = pymupdf.open(str(path))
+    has_images = any(page.get_images() for page in doc)
+    doc.close()
+    image_only = not has_text and has_images
+
+    # Generate IDs
+    page_counters: dict = {}
+    for block in blocks:
+        block["id"] = _generate_block_id(block, page_counters, sections_detected, ref_label)
+        block["preview"] = block["content"][:80].replace("\n", " ")
+
+    # Build stats
+    type_counts: dict[str, int] = {}
+    total_words = 0
+    for b in blocks:
+        type_counts[b["type"]] = type_counts.get(b["type"], 0) + 1
+        total_words += b.get("word_count", 0)
+
+    # Manifest block entries (compact — no full content)
+    manifest_blocks = [
+        {
+            "id": b["id"],
+            "type": b["type"],
+            "page": b["page"],
+            "section": b.get("section"),
+            "preview": b["preview"],
+            "words": b.get("word_count", 0),
+        }
+        for b in blocks
+    ]
+
+    return {
+        "metadata": metadata,
+        "blocks": manifest_blocks,
+        "sections_detected": sections_detected,
+        "image_only": image_only,
+        "stats": {
+            "total_blocks": len(blocks),
+            "total_words": total_words,
+            **{f"{k}s" if not k.endswith("s") else k: v for k, v in type_counts.items()},
+        },
+    }

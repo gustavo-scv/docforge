@@ -5,7 +5,10 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from lib.pdf_core import extract_metadata, detect_headings, extract_blocks
+from lib.pdf_core import (
+    extract_metadata, detect_headings, extract_blocks,
+    assign_sections, build_manifest,
+)
 
 
 class TestExtractMetadata:
@@ -75,3 +78,85 @@ class TestExtractBlocks:
     def test_uniform_font_all_paragraphs(self, uniform_font_pdf):
         blocks = extract_blocks(uniform_font_pdf)
         assert all(b["type"] == "paragraph" for b in blocks)
+
+
+class TestAssignSections:
+    def test_assigns_sections_from_headings(self, simple_pdf):
+        blocks = extract_blocks(simple_pdf)
+        headings = detect_headings(simple_pdf)
+        toc = extract_metadata(simple_pdf)["toc"]
+        sectioned = assign_sections(blocks, headings, toc)
+
+        # Blocks after "1. Introduction" heading should be in section "s1"
+        intro_blocks = [b for b in sectioned if b.get("section") == "s1"]
+        assert len(intro_blocks) >= 1
+
+    def test_sections_detected_flag_true(self, simple_pdf):
+        blocks = extract_blocks(simple_pdf)
+        headings = detect_headings(simple_pdf)
+        toc = extract_metadata(simple_pdf)["toc"]
+        sectioned = assign_sections(blocks, headings, toc)
+        # At least one block has a section
+        assert any(b.get("section") for b in sectioned)
+
+    def test_no_sections_for_uniform_font(self, uniform_font_pdf):
+        blocks = extract_blocks(uniform_font_pdf)
+        headings = detect_headings(uniform_font_pdf)
+        toc = extract_metadata(uniform_font_pdf)["toc"]
+        sectioned = assign_sections(blocks, headings, toc)
+        assert all(b.get("section") is None for b in sectioned)
+
+
+class TestBuildManifest:
+    def test_manifest_has_metadata(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        assert manifest["metadata"]["page_count"] == 2
+
+    def test_manifest_has_blocks(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        assert len(manifest["blocks"]) > 0
+
+    def test_blocks_have_ids(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        assert all("id" in b for b in manifest["blocks"])
+
+    def test_block_ids_include_ref_prefix(self, simple_pdf):
+        manifest = build_manifest(simple_pdf, ref_label="ref1")
+        for b in manifest["blocks"]:
+            assert b["id"].startswith("ref1:")
+
+    def test_block_ids_no_prefix_when_no_label(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        for b in manifest["blocks"]:
+            assert not b["id"].startswith("ref")
+
+    def test_block_ids_include_section_when_detected(self, simple_pdf):
+        manifest = build_manifest(simple_pdf, ref_label="ref1")
+        ids_with_section = [b["id"] for b in manifest["blocks"] if ":s" in b["id"]]
+        assert len(ids_with_section) > 0
+
+    def test_block_ids_fallback_without_section(self, uniform_font_pdf):
+        manifest = build_manifest(uniform_font_pdf, ref_label="ref1")
+        for b in manifest["blocks"]:
+            # Has ref prefix but no section
+            assert b["id"].startswith("ref1:p")
+            assert ":s" not in b["id"]
+
+    def test_sections_detected_flag(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        assert manifest["sections_detected"] is True
+
+    def test_sections_not_detected_flag(self, uniform_font_pdf):
+        manifest = build_manifest(uniform_font_pdf)
+        assert manifest["sections_detected"] is False
+
+    def test_image_only_flag_false(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        assert manifest["image_only"] is False
+
+    def test_manifest_has_stats(self, simple_pdf):
+        manifest = build_manifest(simple_pdf)
+        stats = manifest["stats"]
+        assert "total_blocks" in stats
+        assert "total_words" in stats
+        assert stats["total_blocks"] > 0
