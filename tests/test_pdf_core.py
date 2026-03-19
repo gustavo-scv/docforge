@@ -241,3 +241,62 @@ class TestFetchSection:
         full = parse_full(simple_pdf)
         result = fetch_section(full, "s999")
         assert result == []
+
+
+class TestEdgeCases:
+    def test_image_only_pdf(self, tmp_path):
+        """PDF with only an image and no text — should flag image_only."""
+        path = tmp_path / "image_only.pdf"
+        doc = pymupdf.open()
+        page = doc.new_page()
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 300), 1)
+        pix.set_rect(pix.irect, (200, 200, 200, 255))
+        page.insert_image(pymupdf.Rect(50, 50, 450, 350), pixmap=pix)
+        doc.save(str(path))
+        doc.close()
+
+        manifest = build_manifest(path)
+        assert manifest["metadata"]["page_count"] == 1
+        assert manifest["image_only"] is True
+        text_blocks = [b for b in manifest["blocks"] if b["type"] in ("paragraph", "heading")]
+        assert len(text_blocks) == 0
+
+    def test_empty_pdf(self, tmp_path):
+        """PDF with no content at all."""
+        path = tmp_path / "empty.pdf"
+        doc = pymupdf.open()
+        doc.new_page()
+        doc.save(str(path))
+        doc.close()
+
+        manifest = build_manifest(path)
+        assert manifest["metadata"]["page_count"] == 1
+        assert manifest["blocks"] == []
+        assert manifest["image_only"] is False
+        assert manifest["stats"]["total_blocks"] == 0
+
+    def test_nonexistent_file(self, tmp_path):
+        """Should raise FileNotFoundError for missing files."""
+        with pytest.raises(Exception):
+            build_manifest(tmp_path / "doesnt_exist.pdf")
+
+    def test_multi_font_pdf_heading_detection(self, tmp_path):
+        """PDF with many font sizes — heading detection should use body size heuristic."""
+        path = tmp_path / "multi_font.pdf"
+        doc = pymupdf.open()
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 60), "Main Title", fontsize=16)
+        page.insert_text((72, 100), "Body text paragraph one.", fontsize=11)
+        page.insert_text((72, 140), "1. Footnote reference text.", fontsize=8)
+        page.insert_text((72, 160), "Figure 1 — Caption text.", fontsize=9)
+        page.insert_text((72, 200), "Second Section", fontsize=16)
+        page.insert_text((72, 240), "More body text here.", fontsize=11)
+        doc.save(str(path))
+        doc.close()
+
+        headings = detect_headings(path)
+        heading_texts = [h["text"] for h in headings]
+        assert "Main Title" in heading_texts
+        assert "Second Section" in heading_texts
+        assert not any("Footnote" in t for t in heading_texts)
+        assert not any("Caption" in t for t in heading_texts)
