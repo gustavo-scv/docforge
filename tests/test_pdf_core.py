@@ -9,6 +9,7 @@ from lib.pdf_core import (
     extract_metadata, detect_headings, extract_blocks,
     assign_sections, build_manifest,
     extract_tables, extract_figures,
+    parse_full, fetch_blocks_by_id, fetch_section,
 )
 
 
@@ -209,3 +210,34 @@ class TestExtractFigures:
     def test_no_figures_in_simple_pdf(self, simple_pdf, tmp_output):
         figures = extract_figures(simple_pdf, tmp_output)
         assert figures == []
+
+
+class TestFetchBlocksById:
+    def test_fetches_specific_blocks(self, simple_pdf):
+        full = parse_full(simple_pdf)
+        all_ids = [b["id"] for b in full["blocks"]]
+        target_ids = all_ids[:2]
+        fetched = fetch_blocks_by_id(full, target_ids)
+        assert len(fetched) == 2
+        assert all("content" in b for b in fetched)
+
+    def test_returns_empty_for_unknown_ids(self, simple_pdf):
+        full = parse_full(simple_pdf)
+        fetched = fetch_blocks_by_id(full, ["nonexistent:p99:b1"])
+        assert fetched == []
+
+
+class TestFetchSection:
+    def test_fetches_all_blocks_in_section(self, simple_pdf):
+        full = parse_full(simple_pdf)
+        sections = {b.get("section") for b in full["blocks"] if b.get("section")}
+        if sections:
+            section_id = next(iter(sections))
+            result = fetch_section(full, section_id)
+            assert len(result) >= 1
+            assert all(b["section"] == section_id for b in result)
+
+    def test_returns_empty_for_unknown_section(self, simple_pdf):
+        full = parse_full(simple_pdf)
+        result = fetch_section(full, "s999")
+        assert result == []

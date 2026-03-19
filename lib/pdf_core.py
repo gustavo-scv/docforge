@@ -489,3 +489,71 @@ def build_manifest(path: Path, ref_label: str = "") -> dict:
             **{f"{k}s" if not k.endswith("s") else k: v for k, v in type_counts.items()},
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Full parse and fetch operations
+# ---------------------------------------------------------------------------
+
+def parse_full(
+    path: Path, output_dir: Path | None = None, ref_label: str = "",
+) -> dict:
+    """Parse PDF completely — all blocks with full content, sections, and IDs.
+
+    This is the internal full parse used by BLOCKS and SECTION modes.
+    Unlike build_manifest, blocks here retain their full content.
+
+    Args:
+        path: Path to the PDF file.
+        output_dir: Optional directory for extracted images.
+        ref_label: Optional reference label prepended to block IDs.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"PDF not found: {path}")
+
+    metadata = extract_metadata(path)
+    text_blocks = extract_blocks(path)
+    headings = detect_headings(path)
+    text_blocks = assign_sections(text_blocks, headings, metadata["toc"])
+
+    tables = extract_tables(path)
+    figures = extract_figures(path, output_dir) if output_dir else []
+
+    # Assign sections to tables and figures
+    tables = assign_sections(tables, headings, metadata["toc"])
+    figures = assign_sections(figures, headings, metadata["toc"])
+
+    # Merge all blocks and sort by page + y position
+    all_blocks = text_blocks + tables + figures
+    all_blocks.sort(key=lambda b: (b["page"], b.get("y", 0)))
+
+    sections_detected = any(b.get("section") is not None for b in all_blocks)
+
+    # Generate IDs
+    page_counters: dict = {}
+    for block in all_blocks:
+        block["id"] = _generate_block_id(block, page_counters, sections_detected, ref_label)
+
+    return {
+        "metadata": metadata,
+        "blocks": all_blocks,
+        "sections_detected": sections_detected,
+    }
+
+
+def fetch_blocks_by_id(full_parse: dict, block_ids: list[str]) -> list[dict]:
+    """Fetch specific blocks by their IDs from a full parse result.
+
+    Returns list of blocks with full content, in the order requested.
+    """
+    id_to_block = {b["id"]: b for b in full_parse["blocks"]}
+    return [id_to_block[bid] for bid in block_ids if bid in id_to_block]
+
+
+def fetch_section(full_parse: dict, section_id: str) -> list[dict]:
+    """Fetch all blocks belonging to a specific section.
+
+    Returns list of blocks with full content, in document order.
+    """
+    return [b for b in full_parse["blocks"] if b.get("section") == section_id]
