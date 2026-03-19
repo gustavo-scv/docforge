@@ -215,6 +215,119 @@ def extract_blocks(path: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Table extraction
+# ---------------------------------------------------------------------------
+
+def extract_tables(path: Path) -> list[dict]:
+    """Extract tables from PDF using pymupdf's find_tables.
+
+    Returns list of dicts with: type, page, headers, rows, bbox, word_count, y.
+    """
+    doc = pymupdf.open(str(path))
+    tables = []
+
+    for page_idx, page in enumerate(doc):
+        page_tables = page.find_tables()
+        for table in page_tables:
+            df = table.extract()
+            if not df or len(df) < 2:
+                continue
+
+            headers = [str(cell) if cell else "" for cell in df[0]]
+            rows = [
+                [str(cell) if cell else "" for cell in row]
+                for row in df[1:]
+            ]
+
+            all_text = " ".join(headers + [c for r in rows for c in r])
+            word_count = len(all_text.split())
+
+            tables.append({
+                "type": "table",
+                "page": page_idx + 1,
+                "headers": headers,
+                "rows": rows,
+                "bbox": list(table.bbox),
+                "word_count": word_count,
+                "y": round(table.bbox[1], 1),
+            })
+
+    doc.close()
+    return tables
+
+
+# ---------------------------------------------------------------------------
+# Figure extraction
+# ---------------------------------------------------------------------------
+
+def extract_figures(path: Path, output_dir: Path) -> list[dict]:
+    """Extract images from PDF and detect nearby captions.
+
+    Saves images to output_dir. Detects captions by looking for small-font
+    text below the image bbox (within 40px).
+
+    Returns list of dicts with: type, page, path, width, height, caption, bbox, y.
+    """
+    doc = pymupdf.open(str(path))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    figures = []
+
+    for page_idx, page in enumerate(doc):
+        page_images = page.get_images(full=True)
+
+        for img_idx, img_info in enumerate(page_images):
+            xref = img_info[0]
+            try:
+                base_image = doc.extract_image(xref)
+            except Exception:
+                continue
+
+            if not base_image or not base_image.get("image"):
+                continue
+
+            width = base_image.get("width", 0)
+            height = base_image.get("height", 0)
+
+            if width < 50 or height < 50:
+                continue
+
+            ext = base_image.get("ext", "png")
+            img_filename = f"p{page_idx + 1}_f{img_idx}.{ext}"
+            img_path = output_dir / img_filename
+            img_path.write_bytes(base_image["image"])
+
+            # Find image bbox on page for caption detection
+            img_rects = page.get_image_rects(xref)
+            bbox = list(img_rects[0]) if img_rects else [0, 0, width, height]
+
+            # Detect caption: text below image (within 40px of bottom edge)
+            caption = ""
+            if img_rects:
+                caption_rect = pymupdf.Rect(
+                    bbox[0], bbox[3], bbox[2], bbox[3] + 40
+                )
+                caption_text = page.get_text("text", clip=caption_rect).strip()
+                if caption_text:
+                    caption = caption_text
+
+            figures.append({
+                "type": "figure",
+                "page": page_idx + 1,
+                "path": str(img_path),
+                "width": width,
+                "height": height,
+                "ext": ext,
+                "caption": caption,
+                "bbox": bbox,
+                "y": round(bbox[1], 1),
+                "word_count": len(caption.split()) if caption else 0,
+            })
+
+    doc.close()
+    return figures
+
+
+# ---------------------------------------------------------------------------
 # Section assignment
 # ---------------------------------------------------------------------------
 

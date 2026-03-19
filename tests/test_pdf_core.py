@@ -8,6 +8,7 @@ import pytest
 from lib.pdf_core import (
     extract_metadata, detect_headings, extract_blocks,
     assign_sections, build_manifest,
+    extract_tables, extract_figures,
 )
 
 
@@ -160,3 +161,51 @@ class TestBuildManifest:
         assert "total_blocks" in stats
         assert "total_words" in stats
         assert stats["total_blocks"] > 0
+
+
+class TestExtractTables:
+    def test_finds_tables(self, pdf_with_table):
+        tables = extract_tables(pdf_with_table)
+        assert len(tables) >= 1
+
+    def test_table_has_headers_and_rows(self, pdf_with_table):
+        tables = extract_tables(pdf_with_table)
+        t = tables[0]
+        assert "headers" in t
+        assert "rows" in t
+        assert len(t["rows"]) >= 2
+
+    def test_table_has_page(self, pdf_with_table):
+        tables = extract_tables(pdf_with_table)
+        assert tables[0]["page"] == 1
+
+    def test_no_tables_in_simple_pdf(self, simple_pdf):
+        tables = extract_tables(simple_pdf)
+        assert tables == []
+
+
+class TestExtractFigures:
+    def test_finds_images(self, pdf_with_image, tmp_output):
+        figures = extract_figures(pdf_with_image, tmp_output)
+        assert len(figures) >= 1
+
+    def test_figure_has_path(self, pdf_with_image, tmp_output):
+        figures = extract_figures(pdf_with_image, tmp_output)
+        fig = figures[0]
+        assert "path" in fig
+        assert Path(fig["path"]).exists()
+
+    def test_figure_has_dimensions(self, pdf_with_image, tmp_output):
+        figures = extract_figures(pdf_with_image, tmp_output)
+        fig = figures[0]
+        assert fig["width"] >= 50
+        assert fig["height"] >= 50
+
+    def test_figure_caption_detection(self, pdf_with_image, tmp_output):
+        figures = extract_figures(pdf_with_image, tmp_output)
+        fig = figures[0]
+        assert "caption" in fig
+
+    def test_no_figures_in_simple_pdf(self, simple_pdf, tmp_output):
+        figures = extract_figures(simple_pdf, tmp_output)
+        assert figures == []
