@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "docforge",
-      "source": ".",
+      "source": "./",
       "description": "Plugin de elaboração de documentos técnicos com outputs estruturados para Claude Code"
     }
   ]
