@@ -10,8 +10,8 @@
     {
       "name": "docforge",
       "source": {
-        "source": "github",
-        "repo": "gustavo-scv/docforge"
+        "source": "url",
+        "url": "https://github.com/gustavo-scv/docforge.git"
       },
       "description": "Plugin de elaboração de documentos técnicos com outputs estruturados para Claude Code"
     }
