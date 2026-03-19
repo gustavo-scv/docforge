@@ -4,15 +4,12 @@
     "name": "Gustavo"
   },
   "metadata": {
-    "description": "Marketplace do plugin docforge — elaboração de documentos técnicos"
+    "description": "Plugin de elaboração de documentos técnicos com outputs estruturados"
   },
   "plugins": [
     {
       "name": "docforge",
-      "source": {
-        "source": "url",
-        "url": "https://github.com/gustavo-scv/docforge.git"
-      },
+      "source": ".",
       "description": "Plugin de elaboração de documentos técnicos com outputs estruturados para Claude Code"
     }
   ]
