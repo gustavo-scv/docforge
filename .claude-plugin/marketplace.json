@@ -1,0 +1,16 @@
+{
+  "name": "docforge",
+  "owner": {
+    "name": "Gustavo"
+  },
+  "metadata": {
+    "description": "Marketplace do plugin docforge — elaboração de documentos técnicos"
+  },
+  "plugins": [
+    {
+      "name": "docforge",
+      "source": ".",
+      "description": "Plugin de elaboração de documentos técnicos com outputs estruturados para Claude Code"
+    }
+  ]
+}
